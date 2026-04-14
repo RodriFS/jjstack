@@ -13,6 +13,17 @@ Manage stacked GitHub PRs on top of [Jujutsu (jj)](https://github.com/jj-vcs/jj)
 gh auth login
 ```
 
+## Optional: use as `jj stack`
+
+Add the following alias to your jj config (`~/.config/jj/config.toml`):
+
+```toml
+[aliases]
+stack = ["util", "exec", "jjstack"]
+```
+
+Then you can run all commands as `jj stack submit`, `jj stack status`, etc.
+
 ## Installation
 
 ```sh
