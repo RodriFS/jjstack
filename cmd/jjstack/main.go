@@ -41,7 +41,7 @@ func rootCmd() *cobra.Command {
 Create a chain of bookmarked commits, then use jjstack to turn them into
 stacked PRs, track their status, and clean up after merging.`,
 	}
-	root.AddCommand(submitCmd(), statusCmd(), syncCmd())
+	root.AddCommand(submitCmd(), statusCmd(), syncCmd(), importCmd())
 	return root
 }
 
@@ -356,6 +356,90 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: value from stack state)")
 	cmd.Flags().StringVar(&target, "target", "", "Top bookmark of the stack (default: last in stack order)")
 	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to sync")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// import
+// ---------------------------------------------------------------------------
+
+func importCmd() *cobra.Command {
+	var base string
+
+	cmd := &cobra.Command{
+		Use:   "import <bookmark>",
+		Short: "Import a pre-existing stack of PRs into jjstack state",
+		Long: `import detects the stack from <bookmark> down to base and looks up open GitHub
+PRs for each bookmark. No pushing or PR creation is done — only state is written.
+
+Useful when a stack was created manually or with another tool.`,
+		Args:    cobra.ExactArgs(1),
+		Example: `  jjstack import profile-edit           # import existing PRs for the stack
+  jjstack import profile-edit --base dev # use a non-default base branch`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkDeps(); err != nil {
+				return err
+			}
+			target := args[0]
+			state, err := config.Load()
+			if err != nil {
+				return err
+			}
+
+			effectiveBase := base
+			if effectiveBase == "" {
+				effectiveBase = "main"
+			}
+
+			s, err := stack.Detect(target, effectiveBase)
+			if err != nil {
+				return err
+			}
+
+			// Check if any bookmark is already tracked to avoid duplicates.
+			for _, entry := range s {
+				if st := state.FindStackByBookmark(entry.Bookmark); st != nil {
+					return fmt.Errorf("bookmark %q is already tracked in stack %s — use 'jjstack submit' to update it", entry.Bookmark, st.ID)
+				}
+			}
+
+			stackState := state.NewStack(effectiveBase)
+
+			fmt.Println()
+			ui.Header(fmt.Sprintf("Importing stack (id: %s)", stackState.ID))
+			fmt.Println()
+
+			anyFound := false
+			for _, entry := range s {
+				pr, err := gh.FindPRForHead(entry.Bookmark)
+				if err != nil {
+					return fmt.Errorf("looking up PR for %q: %w", entry.Bookmark, err)
+				}
+				stackState.Order = append(stackState.Order, entry.Bookmark)
+				if pr != nil {
+					stackState.Bookmarks[entry.Bookmark] = config.BookmarkState{PR: pr.Number, PRURL: pr.URL}
+					fmt.Printf("  %-22s  #%-6d  %s\n", entry.Bookmark, pr.Number, pr.URL)
+					anyFound = true
+				} else {
+					fmt.Printf("  %-22s  (no open PR found — run 'jjstack submit %s' to create one)\n", entry.Bookmark, target)
+				}
+			}
+			fmt.Println()
+
+			if !anyFound {
+				// Don't save a useless empty stack.
+				state.RemoveStack(stackState.ID)
+				fmt.Println("No open PRs found for any bookmark in the stack. Nothing imported.")
+				return nil
+			}
+
+			if err := config.Save(state); err != nil {
+				return fmt.Errorf("saving state: %w", err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: main)")
 	return cmd
 }
 
