@@ -65,17 +65,30 @@ func DetectForImport(target, base string) (Stack, error) {
 	// caller passes a remote-qualified name.
 	canonicalTarget := strings.SplitN(target, "@", 2)[0]
 
-	revset := fmt.Sprintf("%s::%s ~ %s", base, target, base)
-	entries, err := jj.LogAll(revset)
-	if err != nil {
-		// If the remote-qualified name failed, try the canonical name.
-		if canonicalTarget != target {
-			revset = fmt.Sprintf("%s::%s ~ %s", base, canonicalTarget, base)
-			entries, err = jj.LogAll(revset)
+	// Try the target as given, then with @origin appended, then with the
+	// canonical name (stripped of any @remote suffix). This lets callers pass
+	// "mybookmark", "mybookmark@origin", or any remote-qualified form.
+	candidates := []string{target}
+	if canonicalTarget == target {
+		candidates = append(candidates, target+"@origin")
+	} else {
+		candidates = append(candidates, canonicalTarget)
+	}
+
+	var entries []jj.LogEntry
+	var lastErr error
+	for _, candidate := range candidates {
+		revset := fmt.Sprintf("%s::%s ~ %s", base, candidate, base)
+		var err error
+		entries, err = jj.LogAll(revset)
+		if err == nil {
+			lastErr = nil
+			break
 		}
-		if err != nil {
-			return nil, fmt.Errorf("detecting stack from %q to %q: %w", canonicalTarget, base, err)
-		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("detecting stack from %q to %q: %w", canonicalTarget, base, lastErr)
 	}
 
 	var bookmarked []jj.LogEntry

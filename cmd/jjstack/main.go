@@ -426,7 +426,7 @@ Useful when a stack was created manually or with another tool.`,
 					fmt.Printf("  %-22s  #%-6d  %s\n", entry.Bookmark, pr.Number, pr.URL)
 					anyFound = true
 				} else {
-					fmt.Printf("  %-22s  (no open PR found — run 'jjstack submit %s' to create one)\n", entry.Bookmark, target)
+					fmt.Printf("  %-22s  (no open PR found — run 'jjstack submit %s' to create one)\n", entry.Bookmark, strings.SplitN(target, "@", 2)[0])
 				}
 			}
 			fmt.Println()
