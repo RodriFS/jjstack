@@ -41,7 +41,7 @@ func rootCmd() *cobra.Command {
 Create a chain of bookmarked commits, then use jjstack to turn them into
 stacked PRs, track their status, and clean up after merging.`,
 	}
-	root.AddCommand(submitCmd(), statusCmd(), syncCmd(), importCmd())
+	root.AddCommand(submitCmd(), statusCmd(), syncCmd(), importCmd(), untrackCmd())
 	return root
 }
 
@@ -445,6 +445,44 @@ Useful when a stack was created manually or with another tool.`,
 		},
 	}
 	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: main)")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// untrack
+// ---------------------------------------------------------------------------
+
+func untrackCmd() *cobra.Command {
+	var stackID string
+
+	cmd := &cobra.Command{
+		Use:   "untrack",
+		Short: "Stop tracking a stack without closing its PRs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkDeps(); err != nil {
+				return err
+			}
+			state, err := config.Load()
+			if err != nil {
+				return err
+			}
+
+			stackState, err := stack.Resolve(state, stackID)
+			if err != nil {
+				return err
+			}
+
+			state.RemoveStack(stackState.ID)
+
+			if err := config.Save(state); err != nil {
+				return fmt.Errorf("saving state: %w", err)
+			}
+
+			fmt.Printf("Stack %s untracked.\n", stackState.ID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to untrack")
 	return cmd
 }
 
