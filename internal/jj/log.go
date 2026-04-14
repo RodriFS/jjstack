@@ -57,6 +57,16 @@ func LogRaw(revset string) (string, error) {
 	return Run("log", "-r", revset)
 }
 
+// LogStack returns the human-readable jj log for only the given bookmarks and
+// the base commit — used for dry-run output so intermediate commits on the
+// trunk are not shown.
+func LogStack(base string, bookmarks []string) (string, error) {
+	revs := make([]string, 0, len(bookmarks)+1)
+	revs = append(revs, base)
+	revs = append(revs, bookmarks...)
+	return Run("log", "-r", strings.Join(revs, "|"))
+}
+
 // AncestorBookmarks returns all local bookmark names that are ancestors of (or
 // at) the current working copy revision (@), up to the given depth.
 // Used to infer which stack the user is currently working in.
