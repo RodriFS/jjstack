@@ -147,11 +147,6 @@ func runSubmitDryRun(target, flagBase string, state *config.State, stackID strin
 		return err
 	}
 
-	logOut, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
-	if err != nil {
-		return err
-	}
-
 	s, err := stack.Detect(target, base)
 	if err != nil {
 		return err
@@ -185,6 +180,7 @@ func runSubmitDryRun(target, flagBase string, state *config.State, stackID strin
 		}
 	}
 
+	logOut, _ := jj.LogFromBase(base, target)
 	ui.DryRunSubmit(logOut, actions)
 	return nil
 }
@@ -342,7 +338,7 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 			}
 
 			if dryRun {
-				beforeLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", effectiveBase, effectiveTarget))
+				beforeLog, _ := jj.LogFromBase(effectiveBase, effectiveTarget)
 				result, err := stack.Sync(s, stackState, true)
 				if err != nil {
 					return err
@@ -371,7 +367,7 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 				return fmt.Errorf("saving state: %w", err)
 			}
 
-			afterLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", effectiveBase, effectiveTarget))
+			afterLog, _ := jj.LogFromBase(effectiveBase, effectiveTarget)
 			ui.SyncResult(afterLog, toUISyncActions(result.Actions))
 			return nil
 		},

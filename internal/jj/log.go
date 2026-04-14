@@ -57,6 +57,17 @@ func LogRaw(revset string) (string, error) {
 	return Run("log", "-r", revset)
 }
 
+// LogFromBase returns the human-readable jj log from base to target.
+// It tries base@origin first (so the view starts at the current remote trunk,
+// not a potentially stale local bookmark), falling back to the local bookmark.
+func LogFromBase(base, target string) (string, error) {
+	out, err := Run("log", "-r", fmt.Sprintf("%s@origin::%s", base, target))
+	if err == nil {
+		return out, nil
+	}
+	return Run("log", "-r", fmt.Sprintf("%s::%s", base, target))
+}
+
 // LogStack returns the human-readable jj log for only the given bookmarks and
 // the base commit — used for dry-run output so intermediate commits on the
 // trunk are not shown.
