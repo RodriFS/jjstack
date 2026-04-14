@@ -60,12 +60,13 @@ func LogRaw(revset string) (string, error) {
 // LogFromBase returns the human-readable jj log from base to target.
 // It tries base@origin first (so the view starts at the current remote trunk,
 // not a potentially stale local bookmark), falling back to the local bookmark.
+// --color=always is passed so ANSI colors are preserved when output is captured.
 func LogFromBase(base, target string) (string, error) {
-	out, err := Run("log", "-r", fmt.Sprintf("%s@origin::%s", base, target))
+	out, err := Run("log", "--color=always", "-r", fmt.Sprintf("%s@origin::%s", base, target))
 	if err == nil {
 		return out, nil
 	}
-	return Run("log", "-r", fmt.Sprintf("%s::%s", base, target))
+	return Run("log", "--color=always", "-r", fmt.Sprintf("%s::%s", base, target))
 }
 
 // LogStack returns the human-readable jj log for only the given bookmarks and
