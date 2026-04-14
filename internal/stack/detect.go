@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rodrifs/jjstack/internal/jj"
 )
@@ -52,5 +53,58 @@ func Detect(target, base string) (Stack, error) {
 		}
 	}
 
+	return stack, nil
+}
+
+// DetectForImport is like Detect but also considers remote-only bookmarks.
+// This allows importing stacks where local bookmarks haven't been created yet.
+// The target may include a remote suffix (e.g. "mybookmark@origin"); it will
+// be stripped for the purposes of bookmark name lookups and PR head matching.
+func DetectForImport(target, base string) (Stack, error) {
+	// Strip @remote suffix so the revset resolves correctly even when the
+	// caller passes a remote-qualified name.
+	canonicalTarget := strings.SplitN(target, "@", 2)[0]
+
+	revset := fmt.Sprintf("%s::%s ~ %s", base, target, base)
+	entries, err := jj.LogAll(revset)
+	if err != nil {
+		// If the remote-qualified name failed, try the canonical name.
+		if canonicalTarget != target {
+			revset = fmt.Sprintf("%s::%s ~ %s", base, canonicalTarget, base)
+			entries, err = jj.LogAll(revset)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("detecting stack from %q to %q: %w", canonicalTarget, base, err)
+		}
+	}
+
+	var bookmarked []jj.LogEntry
+	for _, e := range entries {
+		if len(e.Bookmarks) > 0 {
+			bookmarked = append(bookmarked, e)
+		}
+	}
+	if len(bookmarked) == 0 {
+		return nil, fmt.Errorf("no bookmarked commits found between %q and %q", base, canonicalTarget)
+	}
+
+	for i, j := 0, len(bookmarked)-1; i < j; i, j = i+1, j-1 {
+		bookmarked[i], bookmarked[j] = bookmarked[j], bookmarked[i]
+	}
+
+	stack := make(Stack, len(bookmarked))
+	for i, e := range bookmarked {
+		parent := base
+		if i > 0 {
+			parent = stack[i-1].Bookmark
+		}
+		stack[i] = Entry{
+			Bookmark:       e.Bookmarks[0],
+			ChangeID:       e.ChangeID,
+			CommitID:       e.CommitID,
+			Description:    e.Description,
+			ParentBookmark: parent,
+		}
+	}
 	return stack, nil
 }

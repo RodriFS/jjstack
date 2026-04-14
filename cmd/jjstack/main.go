@@ -396,7 +396,7 @@ Useful when a stack was created manually or with another tool.`,
 				return err
 			}
 
-			s, err := stack.Detect(target, effectiveBase)
+			s, err := stack.DetectForImport(target, effectiveBase)
 			if err != nil {
 				return err
 			}
