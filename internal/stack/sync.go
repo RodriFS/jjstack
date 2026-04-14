@@ -11,7 +11,7 @@ import (
 // SyncAction describes a single rebase/cleanup action during sync.
 type SyncAction struct {
 	MergedBookmark string // the bookmark whose PR was merged
-	RebasedFrom    string // bookmark that was rebased
+	RebasedFrom    string // bookmark that was rebased; empty if it was the top of the stack
 	RebasedOnto    string // what it was rebased onto
 }
 
@@ -57,25 +57,16 @@ func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
 			continue
 		}
 
-		// This PR was merged (squash or regular). Rebase the next entry onto currentBase.
-		// jj rebase -b <next> -d <currentBase> also carries all descendants with it.
+		// This PR was merged. If there's a next entry, rebase it onto currentBase.
 		if i+1 < len(s) {
 			nextBookmark := s[i+1].Bookmark
-			action := SyncAction{
-				MergedBookmark: entry.Bookmark,
-				RebasedFrom:    nextBookmark,
-				RebasedOnto:    currentBase,
-			}
-
 			if !dryRun {
 				if err := jj.Rebase(nextBookmark, currentBase); err != nil {
 					return nil, fmt.Errorf("rebasing %q onto %q: %w", nextBookmark, currentBase, err)
 				}
-				// Force-push the rebased bookmark (and update subsequent ones too).
 				if err := jj.ForcePush(nextBookmark); err != nil {
 					return nil, fmt.Errorf("force-pushing %q after rebase: %w", nextBookmark, err)
 				}
-				// Update the next PR's base to currentBase.
 				nextBS := state.Bookmarks[nextBookmark]
 				if nextBS.PR > 0 {
 					if err := github.UpdatePRBase(nextBS.PR, currentBase); err != nil {
@@ -83,8 +74,16 @@ func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
 					}
 				}
 			}
-
-			result.Actions = append(result.Actions, action)
+			result.Actions = append(result.Actions, SyncAction{
+				MergedBookmark: entry.Bookmark,
+				RebasedFrom:    nextBookmark,
+				RebasedOnto:    currentBase,
+			})
+		} else {
+			// Top of stack was merged — record it so the caller can report it.
+			result.Actions = append(result.Actions, SyncAction{
+				MergedBookmark: entry.Bookmark,
+			})
 		}
 
 		// Mark the merged bookmark for removal from state.

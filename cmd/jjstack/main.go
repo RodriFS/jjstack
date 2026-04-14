@@ -11,6 +11,7 @@ import (
 	gh "github.com/rodrifs/jjstack/internal/github"
 	"github.com/rodrifs/jjstack/internal/jj"
 	"github.com/rodrifs/jjstack/internal/stack"
+	"github.com/rodrifs/jjstack/internal/ui"
 )
 
 func main() {
@@ -19,15 +20,13 @@ func main() {
 	}
 }
 
-// checkDeps verifies that jj and gh are available on PATH and that we're
-// inside a jj repository. Returns a user-friendly error if not.
+// checkDeps verifies that jj is on PATH and we're inside a jj repository.
 func checkDeps() error {
 	if _, err := jj.Run("root"); err != nil {
 		if strings.Contains(err.Error(), "There is no jj repo") ||
 			strings.Contains(err.Error(), "jj root") {
 			return fmt.Errorf("not inside a jj repository (no .jj/ found in parent directories)")
 		}
-		// jj not on PATH at all
 		return fmt.Errorf("jj not found on PATH — install it from https://github.com/jj-vcs/jj")
 	}
 	return nil
@@ -101,26 +100,30 @@ func submitCmd() *cobra.Command {
 }
 
 func runSubmitDryRun(target, base string, state *config.State) error {
-	fmt.Println("=== BEFORE ===")
-	before, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
+	logOut, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
 	if err != nil {
 		return err
 	}
-	fmt.Print(before)
 
 	s, err := stack.Detect(target, base)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("\n=== WOULD SUBMIT ===")
+	actions := make([]ui.SubmitAction, len(s))
 	for i, e := range s {
-		action := "create PR"
-		if bs, ok := state.Bookmarks[e.Bookmark]; ok && bs.PR > 0 {
-			action = fmt.Sprintf("update PR #%d", bs.PR)
+		prNum := 0
+		if bs, ok := state.Bookmarks[e.Bookmark]; ok {
+			prNum = bs.PR
 		}
-		fmt.Printf("  [%d] %s → %s  (%s)\n", i+1, e.Bookmark, e.ParentBookmark, action)
+		actions[i] = ui.SubmitAction{
+			Bookmark: e.Bookmark,
+			Parent:   e.ParentBookmark,
+			PRNum:    prNum,
+		}
 	}
+
+	ui.DryRunSubmit(logOut, actions)
 	return nil
 }
 
@@ -150,51 +153,48 @@ func statusCmd() *cobra.Command {
 			if len(names) == 0 {
 				names = bookmarkNames(state)
 			}
-			// Display top-down (reverse of bottom-up StackOrder).
+			// Reverse bottom-up order to top-down for display.
 			for i, j := 0, len(names)-1; i < j; i, j = i+1, j-1 {
 				names[i], names[j] = names[j], names[i]
 			}
+
 			infos, err := jj.ListBookmarks(names)
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("%-20s  %-10s  %-14s  %-6s  %-8s  %s\n",
-				"BOOKMARK", "LOCAL", "REMOTE", "PR", "STATE", "NOTES")
-			fmt.Println(strings.Repeat("-", 80))
-
+			var rows []ui.StatusRow
 			for _, info := range infos {
 				bs := state.Bookmarks[info.Name]
-				prNum := "-"
-				prState := "-"
-				notes := ""
-
+				row := ui.StatusRow{
+					Bookmark: info.Name,
+					Local:    info.LocalCommit,
+					Remote:   info.RemoteCommit,
+					PRNum:    bs.PR,
+				}
 				if bs.PR > 0 {
-					prNum = fmt.Sprintf("#%d", bs.PR)
 					pr, ghErr := gh.GetPR(bs.PR)
 					if ghErr != nil {
-						prState = "error"
-						notes = ghErr.Error()
+						row.State = "error"
+						row.Notes = ghErr.Error()
 					} else {
-						prState = pr.State
+						row.State = pr.State
 						switch pr.State {
 						case "MERGED":
-							notes = "merged, run 'jjstack sync'"
+							row.Notes = "run 'jjstack sync'"
 						case "OPEN":
 							if info.LocalCommit != info.RemoteCommit {
-								notes = "not pushed (run jjstack submit)"
+								row.Notes = "not pushed (run jjstack submit)"
 							}
 						case "CLOSED":
-							notes = "closed without merging"
+							row.Notes = "closed without merging"
 						}
 					}
-				} else {
-					notes = "no PR yet"
 				}
-
-				fmt.Printf("%-20s  %-10s  %-14s  %-6s  %-8s  %s\n",
-					info.Name, info.LocalCommit, info.RemoteCommit, prNum, prState, notes)
+				rows = append(rows, row)
 			}
+
+			ui.StatusTable(rows)
 			return nil
 		},
 	}
@@ -251,17 +251,8 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 				if err != nil {
 					return err
 				}
-				fmt.Println("=== BEFORE ===")
-				fmt.Print(beforeLog)
-				if len(result.Actions) == 0 {
-					fmt.Println("\nNothing to sync — no merged PRs found.")
-					return nil
-				}
-				fmt.Println("\n=== WOULD SYNC ===")
-				for _, a := range result.Actions {
-					fmt.Printf("  PR merged: %s → rebase %s onto %s\n",
-						a.MergedBookmark, a.RebasedFrom, a.RebasedOnto)
-				}
+				uiActions := toUISyncActions(result.Actions)
+				ui.DryRunSync(beforeLog, uiActions)
 				return nil
 			}
 
@@ -279,16 +270,8 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 				return fmt.Errorf("saving state: %w", err)
 			}
 
-			fmt.Println("Sync complete:")
-			for _, a := range result.Actions {
-				fmt.Printf("  ✓ %s merged → rebased %s onto %s\n",
-					a.MergedBookmark, a.RebasedFrom, a.RebasedOnto)
-			}
-
-			if afterLog, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target)); err == nil {
-				fmt.Println("\n=== AFTER ===")
-				fmt.Print(afterLog)
-			}
+			afterLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
+			ui.SyncResult(afterLog, toUISyncActions(result.Actions))
 			return nil
 		},
 	}
@@ -303,27 +286,40 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 // ---------------------------------------------------------------------------
 
 func printStack(s stack.Stack, current string) {
-	fmt.Println("\nStacked PRs")
+	entries := make([]ui.PREntry, 0, len(s))
 	for i := len(s) - 1; i >= 0; i-- {
 		e := s[i]
+		num := 0
 		url := "(no PR)"
 		if e.PR != nil {
+			num = e.PR.Number
 			url = e.PR.URL
 		}
-		if e.Bookmark == current {
-			fmt.Printf("- -> %s\n", url)
-		} else {
-			fmt.Printf("- %s\n", url)
-		}
+		entries = append(entries, ui.PREntry{
+			Number:  num,
+			URL:     url,
+			Current: e.Bookmark == current,
+		})
 	}
+	ui.PRList(entries)
 }
 
-// bookmarkNames returns bookmark names from state. Map iteration order is random,
-// but for status display order doesn't critically matter.
 func bookmarkNames(state *config.State) []string {
 	names := make([]string, 0, len(state.Bookmarks))
 	for name := range state.Bookmarks {
 		names = append(names, name)
 	}
 	return names
+}
+
+func toUISyncActions(actions []stack.SyncAction) []ui.SyncAction {
+	out := make([]ui.SyncAction, len(actions))
+	for i, a := range actions {
+		out[i] = ui.SyncAction{
+			MergedBookmark: a.MergedBookmark,
+			RebasedFrom:    a.RebasedFrom,
+			RebasedOnto:    a.RebasedOnto,
+		}
+	}
+	return out
 }
