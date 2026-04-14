@@ -154,14 +154,14 @@ Local only — the `.jjstack/` directory contains a `*` gitignore so it is never
   - [x] `submit --dry-run`: show current log + planned actions
   - [x] `sync --dry-run`: show before log + planned rebase actions
 
-- [ ] **Phase 9 — Testing**
-  - [ ] Test with https://github.com/RodriFS/jjstacktest
-  - [ ] Verify submit creates correct stacked PRs
-  - [ ] Verify status output is accurate
-  - [ ] Verify sync works after squash merge
-  - [ ] Verify sync works after regular merge
+- [x] **Phase 9 — Testing**
+  - [x] Test with https://github.com/RodriFS/jjstacktest
+  - [x] Verify submit creates correct stacked PRs
+  - [x] Verify status output is accurate
+  - [x] Verify sync works after squash merge
+  - [x] Verify sync works after regular merge
 
-- [ ] **Phase 10 — Polish**
-  - [ ] Ordered status output (bookmarks in stack order, not map order)
-  - [ ] Stack order preserved in state file
-  - [ ] Better error messages for common failures (not in jj repo, gh not authenticated)
+- [x] **Phase 10 — Polish**
+  - [x] Ordered status output (bookmarks in stack order, not map order)
+  - [x] Stack order preserved in state file
+  - [x] Better error messages for common failures (not in jj repo, gh not authenticated)
