@@ -147,16 +147,12 @@ func runSubmitDryRun(target, flagBase string, state *config.State, stackID strin
 		return err
 	}
 
-	s, err := stack.Detect(target, base)
+	logOut, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
 	if err != nil {
 		return err
 	}
 
-	bookmarks := make([]string, len(s))
-	for i, e := range s {
-		bookmarks[i] = e.Bookmark
-	}
-	logOut, err := jj.LogStack(base, bookmarks)
+	s, err := stack.Detect(target, base)
 	if err != nil {
 		return err
 	}
@@ -346,11 +342,7 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 			}
 
 			if dryRun {
-				stackBookmarks := make([]string, len(s))
-				for i, e := range s {
-					stackBookmarks[i] = e.Bookmark
-				}
-				beforeLog, _ := jj.LogStack(effectiveBase, stackBookmarks)
+				beforeLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", effectiveBase, effectiveTarget))
 				result, err := stack.Sync(s, stackState, true)
 				if err != nil {
 					return err
@@ -379,9 +371,7 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 				return fmt.Errorf("saving state: %w", err)
 			}
 
-			remainingBookmarks := make([]string, len(stackState.Order))
-			copy(remainingBookmarks, stackState.Order)
-			afterLog, _ := jj.LogStack(effectiveBase, remainingBookmarks)
+			afterLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", effectiveBase, effectiveTarget))
 			ui.SyncResult(afterLog, toUISyncActions(result.Actions))
 			return nil
 		},
