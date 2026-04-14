@@ -7,6 +7,7 @@ import (
 	"github.com/rodrifs/jjstack/internal/config"
 	"github.com/rodrifs/jjstack/internal/github"
 	"github.com/rodrifs/jjstack/internal/jj"
+	"github.com/rodrifs/jjstack/internal/ui"
 )
 
 // SubmitResult holds the outcome of a submit operation.
@@ -31,8 +32,12 @@ func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult,
 		}
 
 		// Push the bookmark to origin.
-		if err := jj.Push(entry.Bookmark); err != nil {
-			return nil, fmt.Errorf("pushing %q: %w", entry.Bookmark, err)
+		sp := ui.NewSpinner(fmt.Sprintf("Pushing %s", entry.Bookmark))
+		sp.Start()
+		pushErr := jj.Push(entry.Bookmark)
+		sp.Stop()
+		if pushErr != nil {
+			return nil, fmt.Errorf("pushing %q: %w", entry.Bookmark, pushErr)
 		}
 
 		// Check if we already have a PR recorded in state.
@@ -40,25 +45,34 @@ func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult,
 
 		var pr *github.PR
 		if hasState && bs.PR > 0 {
+			sp = ui.NewSpinner(fmt.Sprintf("Fetching PR #%d for %s", bs.PR, entry.Bookmark))
+			sp.Start()
 			var err error
 			pr, err = github.GetPR(bs.PR)
+			sp.Stop()
 			if err != nil {
 				return nil, fmt.Errorf("fetching PR #%d for %q: %w", bs.PR, entry.Bookmark, err)
 			}
 		} else {
-			// Check if there's already an open PR for this head (e.g. from a previous run
-			// that lost state, or created manually).
+			sp = ui.NewSpinner(fmt.Sprintf("Looking up existing PR for %s", entry.Bookmark))
+			sp.Start()
 			var err error
 			pr, err = github.FindPRForHead(entry.Bookmark)
+			sp.Stop()
 			if err != nil {
 				return nil, fmt.Errorf("searching for existing PR for %q: %w", entry.Bookmark, err)
 			}
 		}
 
 		if pr == nil {
-			// No existing PR — create with a placeholder body; we'll update all bodies
-			// after the full stack is known (so URLs can be included).
-			number, url, err := github.CreatePR(entry.Description, "", entry.ParentBookmark, entry.Bookmark)
+			title := entry.Description
+			if entry.UserTitle != "" {
+				title = entry.UserTitle
+			}
+			sp = ui.NewSpinner(fmt.Sprintf("Creating PR for %s", entry.Bookmark))
+			sp.Start()
+			number, url, err := github.CreatePR(title, "", entry.ParentBookmark, entry.Bookmark)
+			sp.Stop()
 			if err != nil {
 				return nil, fmt.Errorf("creating PR for %q: %w", entry.Bookmark, err)
 			}
@@ -68,8 +82,12 @@ func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult,
 		} else {
 			// Existing PR — update base if it drifted.
 			if pr.BaseRefName != entry.ParentBookmark {
-				if err := github.UpdatePRBase(pr.Number, entry.ParentBookmark); err != nil {
-					return nil, fmt.Errorf("updating base of PR #%d for %q: %w", pr.Number, entry.Bookmark, err)
+				sp = ui.NewSpinner(fmt.Sprintf("Updating base of PR #%d", pr.Number))
+				sp.Start()
+				updateErr := github.UpdatePRBase(pr.Number, entry.ParentBookmark)
+				sp.Stop()
+				if updateErr != nil {
+					return nil, fmt.Errorf("updating base of PR #%d for %q: %w", pr.Number, entry.Bookmark, updateErr)
 				}
 				pr.BaseRefName = entry.ParentBookmark
 				result.Updated = append(result.Updated, entry.Bookmark)
@@ -110,8 +128,12 @@ func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult,
 		}
 		section := buildStackSection(s, i)
 		merged := mergeBody(existing, section)
-		if err := github.UpdatePRBody(entry.PR.Number, merged); err != nil {
-			return nil, fmt.Errorf("updating body of PR #%d for %q: %w", entry.PR.Number, entry.Bookmark, err)
+		sp := ui.NewSpinner(fmt.Sprintf("Updating PR #%d body", entry.PR.Number))
+		sp.Start()
+		updateErr := github.UpdatePRBody(entry.PR.Number, merged)
+		sp.Stop()
+		if updateErr != nil {
+			return nil, fmt.Errorf("updating body of PR #%d for %q: %w", entry.PR.Number, entry.Bookmark, updateErr)
 		}
 	}
 

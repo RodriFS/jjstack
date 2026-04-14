@@ -113,11 +113,16 @@ func submitCmd() *cobra.Command {
 						continue // existing PR — skip
 					}
 					header := fmt.Sprintf("PR: %s → %s\nTitle: %s", s[i].Bookmark, s[i].ParentBookmark, s[i].Description)
-					body, err := editor.Open(header)
+					content, err := editor.Open(header)
 					if err != nil {
 						return fmt.Errorf("editor for %q: %w", s[i].Bookmark, err)
 					}
-					s[i].UserBody = body
+					// First line is the title; everything after the first blank line is the body.
+					parts := strings.SplitN(content, "\n", 2)
+					s[i].UserTitle = strings.TrimSpace(parts[0])
+					if len(parts) > 1 {
+						s[i].UserBody = strings.TrimSpace(parts[1])
+					}
 				}
 			}
 

@@ -6,6 +6,7 @@ import (
 	"github.com/rodrifs/jjstack/internal/config"
 	"github.com/rodrifs/jjstack/internal/github"
 	"github.com/rodrifs/jjstack/internal/jj"
+	"github.com/rodrifs/jjstack/internal/ui"
 )
 
 // SyncAction describes a single rebase/cleanup action during sync.
@@ -29,8 +30,12 @@ func Sync(s Stack, stackState *config.StackState, dryRun bool) (*SyncResult, err
 
 	// Fetch latest remote state so jj knows where origin/* bookmarks are.
 	if !dryRun {
-		if err := jj.Fetch(); err != nil {
-			return nil, fmt.Errorf("fetching from origin: %w", err)
+		sp := ui.NewSpinner("Fetching from origin")
+		sp.Start()
+		fetchErr := jj.Fetch()
+		sp.Stop()
+		if fetchErr != nil {
+			return nil, fmt.Errorf("fetching from origin: %w", fetchErr)
 		}
 	}
 
@@ -47,7 +52,10 @@ func Sync(s Stack, stackState *config.StackState, dryRun bool) (*SyncResult, err
 			continue
 		}
 
+		sp := ui.NewSpinner(fmt.Sprintf("Checking PR #%d", bs.PR))
+		sp.Start()
 		pr, err := github.GetPR(bs.PR)
+		sp.Stop()
 		if err != nil {
 			return nil, fmt.Errorf("fetching PR #%d for %q: %w", bs.PR, entry.Bookmark, err)
 		}
@@ -62,16 +70,28 @@ func Sync(s Stack, stackState *config.StackState, dryRun bool) (*SyncResult, err
 		if i+1 < len(s) {
 			nextBookmark := s[i+1].Bookmark
 			if !dryRun {
-				if err := jj.Rebase(nextBookmark, currentBase); err != nil {
-					return nil, fmt.Errorf("rebasing %q onto %q: %w", nextBookmark, currentBase, err)
+				sp := ui.NewSpinner(fmt.Sprintf("Rebasing %s onto %s", nextBookmark, currentBase))
+				sp.Start()
+				rebaseErr := jj.Rebase(nextBookmark, currentBase)
+				sp.Stop()
+				if rebaseErr != nil {
+					return nil, fmt.Errorf("rebasing %q onto %q: %w", nextBookmark, currentBase, rebaseErr)
 				}
-				if err := jj.ForcePush(nextBookmark); err != nil {
-					return nil, fmt.Errorf("force-pushing %q after rebase: %w", nextBookmark, err)
+				sp = ui.NewSpinner(fmt.Sprintf("Pushing %s", nextBookmark))
+				sp.Start()
+				pushErr := jj.ForcePush(nextBookmark)
+				sp.Stop()
+				if pushErr != nil {
+					return nil, fmt.Errorf("force-pushing %q after rebase: %w", nextBookmark, pushErr)
 				}
 				nextBS := stackState.Bookmarks[nextBookmark]
 				if nextBS.PR > 0 {
-					if err := github.UpdatePRBase(nextBS.PR, currentBase); err != nil {
-						return nil, fmt.Errorf("updating PR #%d base to %q: %w", nextBS.PR, currentBase, err)
+					sp = ui.NewSpinner(fmt.Sprintf("Updating base of PR #%d", nextBS.PR))
+					sp.Start()
+					updateErr := github.UpdatePRBase(nextBS.PR, currentBase)
+					sp.Stop()
+					if updateErr != nil {
+						return nil, fmt.Errorf("updating PR #%d base to %q: %w", nextBS.PR, currentBase, updateErr)
 					}
 				}
 			}

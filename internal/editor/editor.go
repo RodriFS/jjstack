@@ -25,14 +25,19 @@ func Open(header string) (string, error) {
 	}
 	defer os.Remove(f.Name())
 
-	// Blank line at the top — cursor lands here, this is where the user types.
+	// Structure mirrors a git commit message: first line = title, blank line,
+	// then body. Cursor lands at the top.
+	fmt.Fprintf(f, "Title\n")
+	fmt.Fprintf(f, "\n")
+	fmt.Fprintf(f, "Description\n")
 	fmt.Fprintf(f, "\n")
 	fmt.Fprintf(f, "# ---------------------------------------------------------------\n")
 	for _, line := range strings.Split(header, "\n") {
 		fmt.Fprintf(f, "# %s\n", line)
 	}
 	fmt.Fprintf(f, "# ---------------------------------------------------------------\n")
-	fmt.Fprintf(f, "# Write your PR description ABOVE this block.\n")
+	fmt.Fprintf(f, "# First line: PR title.\n")
+	fmt.Fprintf(f, "# After the blank line: PR description.\n")
 	fmt.Fprintf(f, "# Lines starting with '#' are ignored. Save and close to continue.\n")
 	f.Close()
 
