@@ -19,7 +19,7 @@ Add the following alias to your jj config (`~/.config/jj/config.toml`):
 
 ```toml
 [aliases]
-stack = ["util", "exec", "jjstack"]
+stack = ["util", "exec", "--", "jjstack"]
 ```
 
 Then you can run all commands as `jj stack submit`, `jj stack status`, etc.
