@@ -16,7 +16,7 @@ func Open(header string) (string, error) {
 		editor = os.Getenv("VISUAL")
 	}
 	if editor == "" {
-		editor = "vi"
+		editor = "vim"
 	}
 
 	f, err := os.CreateTemp("", "jjstack-*.md")
