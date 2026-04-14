@@ -71,7 +71,7 @@ func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult,
 			}
 			sp = ui.NewSpinner(fmt.Sprintf("Creating PR for %s", entry.Bookmark))
 			sp.Start()
-			number, url, err := github.CreatePR(title, "", entry.ParentBookmark, entry.Bookmark)
+			number, url, err := github.CreatePR(title, entry.UserBody, entry.ParentBookmark, entry.Bookmark)
 			sp.Stop()
 			if err != nil {
 				return nil, fmt.Errorf("creating PR for %q: %w", entry.Bookmark, err)
