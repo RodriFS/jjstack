@@ -43,6 +43,15 @@ func RepoName() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// DefaultBranch returns the default branch name of the current GitHub repo.
+func DefaultBranch() (string, error) {
+	out, err := run("repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // CreatePR creates a new pull request and returns its number and URL.
 // gh pr create prints the PR URL to stdout on success.
 func CreatePR(title, body, base, head string) (int, string, error) {

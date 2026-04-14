@@ -70,9 +70,9 @@ func submitCmd() *cobra.Command {
 				return err
 			}
 
-			effectiveBase := base
-			if effectiveBase == "" {
-				effectiveBase = "main"
+			effectiveBase, err := resolveBase(base)
+			if err != nil {
+				return err
 			}
 
 			if dryRun {
@@ -122,8 +122,13 @@ func submitCmd() *cobra.Command {
 	return cmd
 }
 
-func runSubmitDryRun(target, base string, state *config.State, stackID string) error {
+func runSubmitDryRun(target, flagBase string, state *config.State, stackID string) error {
+	base, err := resolveBase(flagBase)
+	if err != nil {
+		return err
+	}
 	logOut, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
+
 	if err != nil {
 		return err
 	}
@@ -386,9 +391,9 @@ Useful when a stack was created manually or with another tool.`,
 				return err
 			}
 
-			effectiveBase := base
-			if effectiveBase == "" {
-				effectiveBase = "main"
+			effectiveBase, err := resolveBase(base)
+			if err != nil {
+				return err
 			}
 
 			s, err := stack.Detect(target, effectiveBase)
@@ -472,6 +477,19 @@ func bookmarkNames(st *config.StackState) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// resolveBase returns the effective base branch: the flag value if set,
+// otherwise the GitHub repo's default branch.
+func resolveBase(flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
+	}
+	base, err := gh.DefaultBranch()
+	if err != nil {
+		return "", fmt.Errorf("detecting default branch: %w", err)
+	}
+	return base, nil
 }
 
 func reversed(in []string) []string {
