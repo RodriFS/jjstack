@@ -25,9 +25,14 @@ func Open(header string) (string, error) {
 	}
 	defer os.Remove(f.Name())
 
+	// Blank line at the top — cursor lands here, this is where the user types.
+	fmt.Fprintf(f, "\n")
+	fmt.Fprintf(f, "# ---------------------------------------------------------------\n")
 	for _, line := range strings.Split(header, "\n") {
 		fmt.Fprintf(f, "# %s\n", line)
 	}
+	fmt.Fprintf(f, "# ---------------------------------------------------------------\n")
+	fmt.Fprintf(f, "# Write your PR description ABOVE this block.\n")
 	fmt.Fprintf(f, "# Lines starting with '#' are ignored. Save and close to continue.\n")
 	f.Close()
 
