@@ -19,6 +19,20 @@ func main() {
 	}
 }
 
+// checkDeps verifies that jj and gh are available on PATH and that we're
+// inside a jj repository. Returns a user-friendly error if not.
+func checkDeps() error {
+	if _, err := jj.Run("root"); err != nil {
+		if strings.Contains(err.Error(), "There is no jj repo") ||
+			strings.Contains(err.Error(), "jj root") {
+			return fmt.Errorf("not inside a jj repository (no .jj/ found in parent directories)")
+		}
+		// jj not on PATH at all
+		return fmt.Errorf("jj not found on PATH — install it from https://github.com/jj-vcs/jj")
+	}
+	return nil
+}
+
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "jjstack",
@@ -47,6 +61,9 @@ func submitCmd() *cobra.Command {
 		Example: `  jjstack submit profile-edit          # submits auth→main, profile→auth, profile-edit→profile
   jjstack submit profile-edit --dry-run # preview without pushing`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkDeps(); err != nil {
+				return err
+			}
 			target := args[0]
 			state, err := config.Load()
 			if err != nil {
@@ -116,6 +133,9 @@ func statusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show the status of all tracked stacked PRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkDeps(); err != nil {
+				return err
+			}
 			state, err := config.Load()
 			if err != nil {
 				return err
@@ -125,7 +145,15 @@ func statusCmd() *cobra.Command {
 				return nil
 			}
 
-			names := bookmarkNames(state)
+			// Use StackOrder for deterministic top-down display; fall back to map keys.
+			names := state.StackOrder
+			if len(names) == 0 {
+				names = bookmarkNames(state)
+			}
+			// Display top-down (reverse of bottom-up StackOrder).
+			for i, j := 0, len(names)-1; i < j; i, j = i+1, j-1 {
+				names[i], names[j] = names[j], names[i]
+			}
 			infos, err := jj.ListBookmarks(names)
 			if err != nil {
 				return err
@@ -188,6 +216,9 @@ func syncCmd() *cobra.Command {
 		Long: `sync detects which PRs in the stack have been merged (including squash merges)
 by checking their GitHub state, then rebases subsequent entries onto the new base.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkDeps(); err != nil {
+				return err
+			}
 			state, err := config.Load()
 			if err != nil {
 				return err

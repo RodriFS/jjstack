@@ -94,9 +94,19 @@ func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
 	}
 
 	if !dryRun {
+		removing := make(map[string]bool, len(toRemove))
 		for _, name := range toRemove {
 			delete(state.Bookmarks, name)
+			removing[name] = true
 		}
+		// Prune removed bookmarks from StackOrder too.
+		filtered := state.StackOrder[:0]
+		for _, name := range state.StackOrder {
+			if !removing[name] {
+				filtered = append(filtered, name)
+			}
+		}
+		state.StackOrder = filtered
 	}
 
 	return result, nil
