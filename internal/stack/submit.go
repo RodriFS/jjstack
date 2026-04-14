@@ -96,9 +96,17 @@ func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult,
 		if entry.PR == nil {
 			continue
 		}
-		existing, err := github.GetPRBody(entry.PR.Number)
-		if err != nil {
-			return nil, fmt.Errorf("fetching body of PR #%d for %q: %w", entry.PR.Number, entry.Bookmark, err)
+		// For new PRs use the user body collected before submit (avoids a round-trip).
+		// For existing PRs fetch the current body to preserve any edits made on GitHub.
+		var existing string
+		if entry.UserBody != "" {
+			existing = entry.UserBody
+		} else {
+			var err error
+			existing, err = github.GetPRBody(entry.PR.Number)
+			if err != nil {
+				return nil, fmt.Errorf("fetching body of PR #%d for %q: %w", entry.PR.Number, entry.Bookmark, err)
+			}
 		}
 		section := buildStackSection(s, i)
 		merged := mergeBody(existing, section)

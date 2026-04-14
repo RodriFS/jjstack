@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rodrifs/jjstack/internal/config"
+	"github.com/rodrifs/jjstack/internal/editor"
 	gh "github.com/rodrifs/jjstack/internal/github"
 	"github.com/rodrifs/jjstack/internal/jj"
 	"github.com/rodrifs/jjstack/internal/stack"
@@ -53,6 +54,7 @@ func submitCmd() *cobra.Command {
 	var dryRun bool
 	var base string
 	var stackID string
+	var noEdit bool
 
 	cmd := &cobra.Command{
 		Use:   "submit <bookmark>",
@@ -103,6 +105,22 @@ func submitCmd() *cobra.Command {
 				}
 			}
 
+			// Open an editor for each bookmark that doesn't have a PR yet,
+			// so the user can write a description before the PR is created.
+			if !noEdit {
+				for i := range s {
+					if _, exists := stackState.Bookmarks[s[i].Bookmark]; exists {
+						continue // existing PR — skip
+					}
+					header := fmt.Sprintf("PR: %s → %s\nTitle: %s", s[i].Bookmark, s[i].ParentBookmark, s[i].Description)
+					body, err := editor.Open(header)
+					if err != nil {
+						return fmt.Errorf("editor for %q: %w", s[i].Bookmark, err)
+					}
+					s[i].UserBody = body
+				}
+			}
+
 			result, err := stack.Submit(s, stackState, false)
 			if err != nil {
 				return err
@@ -119,6 +137,7 @@ func submitCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without pushing or creating PRs")
 	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: main)")
 	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to operate on")
+	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "Skip editor and create PRs with no description")
 	return cmd
 }
 
