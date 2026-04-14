@@ -17,8 +17,8 @@ type SubmitResult struct {
 }
 
 // Submit pushes all entries in the stack to origin and creates or updates
-// their GitHub PRs. State is persisted to .jjstack/state.json.
-func Submit(s Stack, state *config.State, dryRun bool) (*SubmitResult, error) {
+// their GitHub PRs. stackState is updated in place; call config.Save afterwards.
+func Submit(s Stack, stackState *config.StackState, dryRun bool) (*SubmitResult, error) {
 	result := &SubmitResult{Stack: s}
 
 	for i := range s {
@@ -36,7 +36,7 @@ func Submit(s Stack, state *config.State, dryRun bool) (*SubmitResult, error) {
 		}
 
 		// Check if we already have a PR recorded in state.
-		bs, hasState := state.Bookmarks[entry.Bookmark]
+		bs, hasState := stackState.Bookmarks[entry.Bookmark]
 
 		var pr *github.PR
 		if hasState && bs.PR > 0 {
@@ -62,7 +62,7 @@ func Submit(s Stack, state *config.State, dryRun bool) (*SubmitResult, error) {
 			if err != nil {
 				return nil, fmt.Errorf("creating PR for %q: %w", entry.Bookmark, err)
 			}
-			state.Bookmarks[entry.Bookmark] = config.BookmarkState{PR: number, PRURL: url}
+			stackState.Bookmarks[entry.Bookmark] = config.BookmarkState{PR: number, PRURL: url}
 			entry.PR = &github.PR{Number: number, URL: url, State: "OPEN", BaseRefName: entry.ParentBookmark}
 			result.Created = append(result.Created, entry.Bookmark)
 		} else {
@@ -74,7 +74,7 @@ func Submit(s Stack, state *config.State, dryRun bool) (*SubmitResult, error) {
 				pr.BaseRefName = entry.ParentBookmark
 				result.Updated = append(result.Updated, entry.Bookmark)
 			}
-			state.Bookmarks[entry.Bookmark] = config.BookmarkState{PR: pr.Number, PRURL: pr.URL}
+			stackState.Bookmarks[entry.Bookmark] = config.BookmarkState{PR: pr.Number, PRURL: pr.URL}
 			entry.PR = pr
 		}
 	}
@@ -88,7 +88,7 @@ func Submit(s Stack, state *config.State, dryRun bool) (*SubmitResult, error) {
 	for i, e := range s {
 		order[i] = e.Bookmark
 	}
-	state.StackOrder = order
+	stackState.Order = order
 
 	// Second pass: update every PR body now that all URLs are known.
 	// We preserve any user-written content and only manage the jjstack section.

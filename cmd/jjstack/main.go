@@ -52,6 +52,7 @@ stacked PRs, track their status, and clean up after merging.`,
 func submitCmd() *cobra.Command {
 	var dryRun bool
 	var base string
+	var stackID string
 
 	cmd := &cobra.Command{
 		Use:   "submit <bookmark>",
@@ -68,20 +69,41 @@ func submitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if base == "" {
-				base = state.BaseBranch
+
+			effectiveBase := base
+			if effectiveBase == "" {
+				effectiveBase = "main"
 			}
 
 			if dryRun {
-				return runSubmitDryRun(target, base, state)
+				return runSubmitDryRun(target, effectiveBase, state, stackID)
 			}
 
-			s, err := stack.Detect(target, base)
+			s, err := stack.Detect(target, effectiveBase)
 			if err != nil {
 				return err
 			}
 
-			result, err := stack.Submit(s, state, false)
+			// Find the existing stack that tracks any of these bookmarks, or create one.
+			var stackState *config.StackState
+			if stackID != "" {
+				stackState = state.FindStackByID(stackID)
+				if stackState == nil {
+					return fmt.Errorf("no stack with id %q", stackID)
+				}
+			} else {
+				for _, entry := range s {
+					if st := state.FindStackByBookmark(entry.Bookmark); st != nil {
+						stackState = st
+						break
+					}
+				}
+				if stackState == nil {
+					stackState = state.NewStack(effectiveBase)
+				}
+			}
+
+			result, err := stack.Submit(s, stackState, false)
 			if err != nil {
 				return err
 			}
@@ -95,11 +117,12 @@ func submitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without pushing or creating PRs")
-	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: value from state, or 'main')")
+	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: main)")
+	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to operate on")
 	return cmd
 }
 
-func runSubmitDryRun(target, base string, state *config.State) error {
+func runSubmitDryRun(target, base string, state *config.State, stackID string) error {
 	logOut, err := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
 	if err != nil {
 		return err
@@ -110,11 +133,26 @@ func runSubmitDryRun(target, base string, state *config.State) error {
 		return err
 	}
 
+	// Find existing stack for PR numbers (best-effort; no creation in dry-run).
+	var stackState *config.StackState
+	if stackID != "" {
+		stackState = state.FindStackByID(stackID)
+	} else {
+		for _, entry := range s {
+			if st := state.FindStackByBookmark(entry.Bookmark); st != nil {
+				stackState = st
+				break
+			}
+		}
+	}
+
 	actions := make([]ui.SubmitAction, len(s))
 	for i, e := range s {
 		prNum := 0
-		if bs, ok := state.Bookmarks[e.Bookmark]; ok {
-			prNum = bs.PR
+		if stackState != nil {
+			if bs, ok := stackState.Bookmarks[e.Bookmark]; ok {
+				prNum = bs.PR
+			}
 		}
 		actions[i] = ui.SubmitAction{
 			Bookmark: e.Bookmark,
@@ -132,6 +170,8 @@ func runSubmitDryRun(target, base string, state *config.State) error {
 // ---------------------------------------------------------------------------
 
 func statusCmd() *cobra.Command {
+	var stackID string
+
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the status of all tracked stacked PRs",
@@ -143,62 +183,86 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(state.Bookmarks) == 0 {
+			if len(state.Stacks) == 0 {
 				fmt.Println("No stacked PRs tracked. Run 'jjstack submit <bookmark>' to get started.")
 				return nil
 			}
 
-			// Use StackOrder for deterministic top-down display; fall back to map keys.
-			names := state.StackOrder
-			if len(names) == 0 {
-				names = bookmarkNames(state)
-			}
-			// Reverse bottom-up order to top-down for display.
-			for i, j := 0, len(names)-1; i < j; i, j = i+1, j-1 {
-				names[i], names[j] = names[j], names[i]
-			}
-
-			infos, err := jj.ListBookmarks(names)
-			if err != nil {
-				return err
-			}
-
-			var rows []ui.StatusRow
-			for _, info := range infos {
-				bs := state.Bookmarks[info.Name]
-				row := ui.StatusRow{
-					Bookmark: info.Name,
-					Local:    info.LocalCommit,
-					Remote:   info.RemoteCommit,
-					PRNum:    bs.PR,
+			// Determine which stacks to display.
+			var stacks []*config.StackState
+			if stackID != "" {
+				st := state.FindStackByID(stackID)
+				if st == nil {
+					return fmt.Errorf("no stack with id %q", stackID)
 				}
-				if bs.PR > 0 {
-					pr, ghErr := gh.GetPR(bs.PR)
-					if ghErr != nil {
-						row.State = "error"
-						row.Notes = ghErr.Error()
-					} else {
-						row.State = pr.State
-						switch pr.State {
-						case "MERGED":
-							row.Notes = "run 'jjstack sync'"
-						case "OPEN":
-							if info.LocalCommit != info.RemoteCommit {
-								row.Notes = "not pushed (run jjstack submit)"
-							}
-						case "CLOSED":
-							row.Notes = "closed without merging"
-						}
-					}
-				}
-				rows = append(rows, row)
+				stacks = []*config.StackState{st}
+			} else {
+				stacks = state.Stacks
 			}
 
-			ui.StatusTable(rows)
+			for _, st := range stacks {
+				if err := printStackStatus(st); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to show (default: all stacks)")
 	return cmd
+}
+
+func printStackStatus(st *config.StackState) error {
+	// Use Order for deterministic top-down display; fall back to map keys.
+	names := st.Order
+	if len(names) == 0 {
+		names = bookmarkNames(st)
+	}
+	// Reverse bottom-up order to top-down for display.
+	names = reversed(names)
+
+	infos, err := jj.ListBookmarks(names)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+	ui.Header(fmt.Sprintf("Stack %s  (base: %s)", st.ID, st.Base))
+	fmt.Println()
+
+	var rows []ui.StatusRow
+	for _, info := range infos {
+		bs := st.Bookmarks[info.Name]
+		row := ui.StatusRow{
+			Bookmark: info.Name,
+			Local:    info.LocalCommit,
+			Remote:   info.RemoteCommit,
+			PRNum:    bs.PR,
+		}
+		if bs.PR > 0 {
+			pr, ghErr := gh.GetPR(bs.PR)
+			if ghErr != nil {
+				row.State = "error"
+				row.Notes = ghErr.Error()
+			} else {
+				row.State = pr.State
+				switch pr.State {
+				case "MERGED":
+					row.Notes = "run 'jjstack sync'"
+				case "OPEN":
+					if info.LocalCommit != info.RemoteCommit {
+						row.Notes = "not pushed (run jjstack submit)"
+					}
+				case "CLOSED":
+					row.Notes = "closed without merging"
+				}
+			}
+		}
+		rows = append(rows, row)
+	}
+
+	ui.StatusTable(rows)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +273,7 @@ func syncCmd() *cobra.Command {
 	var dryRun bool
 	var base string
 	var target string
+	var stackID string
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -223,31 +288,38 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 			if err != nil {
 				return err
 			}
-			if base == "" {
-				base = state.BaseBranch
-			}
-			if len(state.Bookmarks) == 0 {
+			if len(state.Stacks) == 0 {
 				fmt.Println("No stacked PRs tracked.")
 				return nil
 			}
 
-			if target == "" {
-				order := state.StackOrder
-				if len(order) == 0 {
+			stackState, err := stack.Resolve(state, stackID)
+			if err != nil {
+				return err
+			}
+
+			effectiveBase := base
+			if effectiveBase == "" {
+				effectiveBase = stackState.Base
+			}
+
+			effectiveTarget := target
+			if effectiveTarget == "" {
+				if len(stackState.Order) == 0 {
 					fmt.Println("No stack order in state. Run 'jjstack submit' first.")
 					return nil
 				}
-				target = order[len(order)-1]
+				effectiveTarget = stackState.Order[len(stackState.Order)-1]
 			}
 
-			s, err := stack.Detect(target, base)
+			s, err := stack.Detect(effectiveTarget, effectiveBase)
 			if err != nil {
 				return err
 			}
 
 			if dryRun {
-				beforeLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
-				result, err := stack.Sync(s, state, true)
+				beforeLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", effectiveBase, effectiveTarget))
+				result, err := stack.Sync(s, stackState, true)
 				if err != nil {
 					return err
 				}
@@ -256,7 +328,7 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 				return nil
 			}
 
-			result, err := stack.Sync(s, state, false)
+			result, err := stack.Sync(s, stackState, false)
 			if err != nil {
 				return err
 			}
@@ -266,18 +338,24 @@ by checking their GitHub state, then rebases subsequent entries onto the new bas
 				return nil
 			}
 
+			// Remove the stack from state entirely if all bookmarks were merged.
+			if len(stackState.Bookmarks) == 0 {
+				state.RemoveStack(stackState.ID)
+			}
+
 			if err := config.Save(state); err != nil {
 				return fmt.Errorf("saving state: %w", err)
 			}
 
-			afterLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", base, target))
+			afterLog, _ := jj.LogRaw(fmt.Sprintf("%s::%s", effectiveBase, effectiveTarget))
 			ui.SyncResult(afterLog, toUISyncActions(result.Actions))
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without modifying anything")
-	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: value from state, or 'main')")
-	cmd.Flags().StringVar(&target, "target", "", "Top bookmark of the stack (default: last in state)")
+	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: value from stack state)")
+	cmd.Flags().StringVar(&target, "target", "", "Top bookmark of the stack (default: last in stack order)")
+	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to sync")
 	return cmd
 }
 
@@ -304,12 +382,21 @@ func printStack(s stack.Stack, current string) {
 	ui.PRList(entries)
 }
 
-func bookmarkNames(state *config.State) []string {
-	names := make([]string, 0, len(state.Bookmarks))
-	for name := range state.Bookmarks {
+func bookmarkNames(st *config.StackState) []string {
+	names := make([]string, 0, len(st.Bookmarks))
+	for name := range st.Bookmarks {
 		names = append(names, name)
 	}
 	return names
+}
+
+func reversed(in []string) []string {
+	out := make([]string, len(in))
+	copy(out, in)
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
 }
 
 func toUISyncActions(actions []stack.SyncAction) []ui.SyncAction {

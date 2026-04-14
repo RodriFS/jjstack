@@ -1,6 +1,7 @@
 package jj
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -39,6 +40,22 @@ func CommitID(rev string) (string, error) {
 // LogRaw returns the human-readable jj log for display purposes (e.g. dry-run).
 func LogRaw(revset string) (string, error) {
 	return Run("log", "-r", revset)
+}
+
+// AncestorBookmarks returns all local bookmark names that are ancestors of (or
+// at) the current working copy revision (@), up to the given depth.
+// Used to infer which stack the user is currently working in.
+func AncestorBookmarks(depth int) ([]string, error) {
+	revset := fmt.Sprintf("ancestors(@, %d) & bookmarks()", depth)
+	entries, err := Log(revset)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Bookmarks...)
+	}
+	return names, nil
 }
 
 func parseLog(out string) []LogEntry {

@@ -23,7 +23,8 @@ type SyncResult struct {
 // Sync detects merged PRs in the stack (bottom-up) and rebases subsequent
 // entries onto the new base. Handles both regular and squash merges by checking
 // GitHub PR state rather than commit ancestry.
-func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
+// stackState is updated in place; call config.Save afterwards.
+func Sync(s Stack, stackState *config.StackState, dryRun bool) (*SyncResult, error) {
 	result := &SyncResult{}
 
 	// Fetch latest remote state so jj knows where origin/* bookmarks are.
@@ -35,11 +36,11 @@ func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
 
 	// Walk the stack bottom-up, looking for merged PRs.
 	// When we find one, rebase everything above it onto the current base.
-	currentBase := state.BaseBranch
+	currentBase := stackState.Base
 	toRemove := []string{}
 
 	for i, entry := range s {
-		bs, ok := state.Bookmarks[entry.Bookmark]
+		bs, ok := stackState.Bookmarks[entry.Bookmark]
 		if !ok || bs.PR == 0 {
 			// No PR recorded — skip.
 			currentBase = entry.Bookmark
@@ -67,7 +68,7 @@ func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
 				if err := jj.ForcePush(nextBookmark); err != nil {
 					return nil, fmt.Errorf("force-pushing %q after rebase: %w", nextBookmark, err)
 				}
-				nextBS := state.Bookmarks[nextBookmark]
+				nextBS := stackState.Bookmarks[nextBookmark]
 				if nextBS.PR > 0 {
 					if err := github.UpdatePRBase(nextBS.PR, currentBase); err != nil {
 						return nil, fmt.Errorf("updating PR #%d base to %q: %w", nextBS.PR, currentBase, err)
@@ -88,24 +89,23 @@ func Sync(s Stack, state *config.State, dryRun bool) (*SyncResult, error) {
 
 		// Mark the merged bookmark for removal from state.
 		toRemove = append(toRemove, entry.Bookmark)
-		// currentBase stays as the same base (the merged entry's parent) — the next
-		// entry is now directly on top of currentBase after the rebase.
+		// currentBase stays the same — the next entry is now directly on top of it.
 	}
 
 	if !dryRun {
 		removing := make(map[string]bool, len(toRemove))
 		for _, name := range toRemove {
-			delete(state.Bookmarks, name)
+			delete(stackState.Bookmarks, name)
 			removing[name] = true
 		}
-		// Prune removed bookmarks from StackOrder too.
-		filtered := state.StackOrder[:0]
-		for _, name := range state.StackOrder {
+		// Prune removed bookmarks from Order too.
+		filtered := stackState.Order[:0]
+		for _, name := range stackState.Order {
 			if !removing[name] {
 				filtered = append(filtered, name)
 			}
 		}
-		state.StackOrder = filtered
+		stackState.Order = filtered
 	}
 
 	return result, nil
