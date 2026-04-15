@@ -55,6 +55,8 @@ func submitCmd() *cobra.Command {
 	var base string
 	var stackID string
 	var noEdit bool
+	var flagTitle string
+	var flagDesc string
 
 	cmd := &cobra.Command{
 		Use:   "submit <bookmark>",
@@ -105,24 +107,28 @@ func submitCmd() *cobra.Command {
 				}
 			}
 
-			// Open an editor for each bookmark that doesn't have a PR yet,
-			// so the user can write a description before the PR is created.
-			if !noEdit {
-				for i := range s {
-					if _, exists := stackState.Bookmarks[s[i].Bookmark]; exists {
-						continue // existing PR — skip
-					}
-					header := fmt.Sprintf("PR: %s → %s\nTitle: %s", s[i].Bookmark, s[i].ParentBookmark, s[i].Description)
-					content, err := editor.Open(header)
-					if err != nil {
-						return fmt.Errorf("editor for %q: %w", s[i].Bookmark, err)
-					}
-					// First line is the title; everything after the first blank line is the body.
-					parts := strings.SplitN(content, "\n", 2)
-					s[i].UserTitle = strings.TrimSpace(parts[0])
-					if len(parts) > 1 {
-						s[i].UserBody = strings.TrimSpace(parts[1])
-					}
+			// Open an editor for each bookmark that doesn't have a PR yet.
+			// If both --title and --desc are provided, skip the editor entirely.
+			// If only one is provided, pre-fill it in the editor.
+			bothProvided := flagTitle != "" && flagDesc != ""
+			for i := range s {
+				if _, exists := stackState.Bookmarks[s[i].Bookmark]; exists {
+					continue // existing PR — skip
+				}
+				if noEdit || bothProvided {
+					s[i].UserTitle = flagTitle
+					s[i].UserBody = flagDesc
+					continue
+				}
+				header := fmt.Sprintf("PR: %s → %s\nCommit: %s", s[i].Bookmark, s[i].ParentBookmark, s[i].Description)
+				content, err := editor.Open(header, flagTitle, flagDesc)
+				if err != nil {
+					return fmt.Errorf("editor for %q: %w", s[i].Bookmark, err)
+				}
+				parts := strings.SplitN(content, "\n", 2)
+				s[i].UserTitle = strings.TrimSpace(parts[0])
+				if len(parts) > 1 {
+					s[i].UserBody = strings.TrimSpace(parts[1])
 				}
 			}
 
@@ -143,6 +149,8 @@ func submitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&base, "base", "", "Base branch (default: main)")
 	cmd.Flags().StringVar(&stackID, "stack", "", "Stack ID to operate on")
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "Skip editor and create PRs with no description")
+	cmd.Flags().StringVar(&flagTitle, "title", "", "PR title (skips editor if combined with --desc)")
+	cmd.Flags().StringVar(&flagDesc, "desc", "", "PR description (skips editor if combined with --title)")
 	return cmd
 }
 

@@ -8,9 +8,10 @@ import (
 )
 
 // Open opens the user's preferred editor with the given header as context
-// (shown as comment lines). Returns the trimmed content with comment lines
-// stripped. Returns an empty string if the user saves nothing.
-func Open(header string) (string, error) {
+// (shown as comment lines). initialTitle and initialDesc pre-fill the
+// corresponding fields; pass empty strings to leave them blank.
+// Returns the trimmed content with comment lines stripped.
+func Open(header, initialTitle, initialDesc string) (string, error) {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = os.Getenv("VISUAL")
@@ -26,10 +27,10 @@ func Open(header string) (string, error) {
 	defer os.Remove(f.Name())
 
 	fmt.Fprintf(f, "# Write the title below:\n")
-	fmt.Fprintf(f, "\n")
+	fmt.Fprintf(f, "%s\n", initialTitle)
 	fmt.Fprintf(f, "\n")
 	fmt.Fprintf(f, "# Write the description below:\n")
-	fmt.Fprintf(f, "\n")
+	fmt.Fprintf(f, "%s\n", initialDesc)
 	fmt.Fprintf(f, "\n")
 	fmt.Fprintf(f, "# ---------------------------------------------------------------\n")
 	for _, line := range strings.Split(header, "\n") {
